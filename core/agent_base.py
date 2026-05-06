@@ -1,10 +1,12 @@
 """Abstract base class for all agents in the system.
 
-Phase 1: Existing agents are wrapped via adapters that subclass AgentBase.
-Phase 2: Agents will be refactored to inherit from AgentBase directly.
+Agents inherit from AgentBase and implement name + run(state).
+The Orchestrator operates on AgentBase instances, decoupling workflow
+logic from concrete agent implementations.
 """
 
 from abc import ABC, abstractmethod
+from core.state import WorkflowState
 
 
 class AgentBase(ABC):
@@ -22,14 +24,14 @@ class AgentBase(ABC):
         ...
 
     @abstractmethod
-    def run(self, state: dict) -> dict:
+    def run(self, state: WorkflowState) -> WorkflowState:
         """Execute this agent, transforming the shared workflow state.
 
         Args:
-            state: The workflow state dict. Keys are convention-based;
-                   agents read what they need and add their outputs.
+            state: The typed WorkflowState. Agents read fields they need
+                   and write their outputs back, mutating in place.
 
         Returns:
-            The updated state dict (may be the same object or a copy).
+            The same WorkflowState instance (mutated in place).
         """
         ...

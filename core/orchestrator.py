@@ -7,9 +7,13 @@ Phase 3: Uses a Planner to dynamically decide each next step instead of
 
 from core.agent_base import AgentBase
 from core.planner import Planner
+from core.state import WorkflowState
+from core.logging_setup import get_logger, log_duration
 from tools.tester import run_tests, run_lint
 from tools.patch import PatchError
 import config
+
+logger = get_logger(__name__)
 
 
 class Orchestrator:
@@ -50,7 +54,7 @@ class Orchestrator:
     # Synchronous workflow (CLI)
     # ------------------------------------------------------------------
 
-    def run_workflow(self, task: str, focus_files: list[str] = None) -> dict:
+    def run_workflow(self, task: str, focus_files: list[str] = None) -> WorkflowState:
         """Execute the coding agent workflow with Planner-driven decisions.
 
         Args:
@@ -58,16 +62,13 @@ class Orchestrator:
             focus_files: Optional list of specific files to focus on.
 
         Returns:
-            Final state dict with results.
+            Final WorkflowState with all results.
         """
-        state = {
-            "task": task,
-            "focus_files": focus_files,
-            "modified_files": [],
-        }
+        state = WorkflowState(task=task, focus_files=focus_files)
         history: list[dict] = []
         planner = Planner()
 
+        logger.info("Workflow started — task: %s", task)
         print("=" * 60)
         print("CODING AGENT — Starting workflow")
         print(f"Task: {task}")
@@ -84,9 +85,11 @@ class Orchestrator:
             reasoning = decision.get("reasoning", "")
 
             if step_name == "done":
-                print(f"\n  Planner: ✓ {reasoning}")
+                logger.info("Planner decided: done — %s", reasoning)
+                print(f"\n  Planner: {reasoning}")
                 break
 
+            logger.info("Step %d: %s — %s", step_num, step_name, reasoning)
             print(f"\n[{step_num}] Planner → {step_name}")
             if reasoning:
                 print(f"  Reason: {reasoning}")
@@ -97,14 +100,18 @@ class Orchestrator:
 
             # If the step produced a fatal error, planner will catch it next iteration
             if history_entry.get("result") == "fatal":
-                # Let the planner see this and decide (it will say "done")
                 continue
 
         if step_num >= self.MAX_STEPS:
+            logger.warning("Max steps (%d) reached — stopping workflow", self.MAX_STEPS)
             print(f"\n  WARNING: Reached max steps ({self.MAX_STEPS}). Stopping.")
 
         # Summary
         self._print_summary(state)
+        logger.info("Workflow finished — tests=%s, lint=%s, files=%s",
+                     "passed" if (state.test_results and state.test_results.get("passed")) else "failed",
+                     "passed" if (state.lint_results and state.lint_results.get("passed")) else "failed",
+                     state.modified_files)
         return state
 
     # ------------------------------------------------------------------
@@ -117,13 +124,11 @@ class Orchestrator:
         Yields SSE event dicts. Planner decisions are emitted as events
         so the UI can show the dynamic workflow progression.
         """
-        state = {
-            "task": task,
-            "focus_files": focus_files,
-            "modified_files": [],
-        }
+        state = WorkflowState(task=task, focus_files=focus_files)
         history: list[dict] = []
         planner = Planner()
+
+        logger.info("Streaming workflow started — task: %s", task)
 
         yield {"type": "step_start", "step": "workflow",
                "message": f"Starting workflow for: {task}"}
@@ -162,7 +167,7 @@ class Orchestrator:
     # Step execution (CLI)
     # ------------------------------------------------------------------
 
-    def _execute_step(self, step_name: str, state: dict, decision: dict) -> dict:
+    def _execute_step(self, step_name: str, state: WorkflowState, decision: dict) -> dict:
         """Execute a single workflow step and return a history entry.
 
         Args:
@@ -173,25 +178,27 @@ class Orchestrator:
         Returns:
             History entry dict: {step, result, ...}
         """
-        if step_name == "coder":
-            return self._do_coder(state)
-        elif step_name == "lint":
-            return self._do_check(state, run_lint, "lint_results", "lint")
-        elif step_name == "test":
-            return self._do_check(state, run_tests, "test_results", "test")
-        elif step_name == "fix":
-            trigger = decision.get("trigger") or self._infer_trigger(state)
-            return self._do_fix(state, trigger)
-        elif step_name == "review":
-            return self._do_review(state)
-        else:
-            return {"step": step_name, "result": "unknown_step"}
+        with log_duration(logger, f"Step '{step_name}'"):
+            if step_name == "coder":
+                return self._do_coder(state)
+            elif step_name == "lint":
+                return self._do_check(state, run_lint, "lint_results", "lint")
+            elif step_name == "test":
+                return self._do_check(state, run_tests, "test_results", "test")
+            elif step_name == "fix":
+                trigger = decision.get("trigger") or self._infer_trigger(state)
+                return self._do_fix(state, trigger)
+            elif step_name == "review":
+                return self._do_review(state)
+            else:
+                logger.warning("Unknown step: %s", step_name)
+                return {"step": step_name, "result": "unknown_step"}
 
     # ------------------------------------------------------------------
     # Step execution (streaming)
     # ------------------------------------------------------------------
 
-    def _execute_step_stream(self, step_name: str, state: dict,
+    def _execute_step_stream(self, step_name: str, state: WorkflowState,
                              decision: dict, history: list[dict]):
         """Event-emitting version of _execute_step. Yields SSE events.
 
@@ -207,8 +214,8 @@ class Orchestrator:
             entry = self._do_coder(state)
             if entry["result"] == "success":
                 yield {"type": "step_done", "step": "coder",
-                       "modified_files": state.get("modified_files", []),
-                       "patch": state.get("patch", "")}
+                       "modified_files": state.modified_files,
+                       "patch": state.patch}
             else:
                 yield {"type": "step_error", "step": "coder",
                        "error": entry.get("error", "Unknown error")}
@@ -225,7 +232,7 @@ class Orchestrator:
                    "message": f"Running {label} check (attempt {attempt})..."}
 
             entry = self._do_check(state, check_fn, result_key, label)
-            results = state.get(result_key, {})
+            results = getattr(state, result_key, {}) or {}
 
             yield {"type": "check_result",
                    "check": label,
@@ -255,7 +262,7 @@ class Orchestrator:
             entry = self._do_review(state)
             if entry["result"] == "success":
                 yield {"type": "step_done", "step": "review",
-                       "review": state.get("review", "")}
+                       "review": state.review}
             else:
                 yield {"type": "step_error", "step": "review",
                        "error": entry.get("error", "Review failed")}
@@ -268,26 +275,28 @@ class Orchestrator:
     # Step implementations
     # ------------------------------------------------------------------
 
-    def _do_coder(self, state: dict) -> dict:
+    def _do_coder(self, state: WorkflowState) -> dict:
         """Run the coder agent. Returns history entry."""
         try:
             agent = self.get("coder")
-            agent.run(state)  # mutates state in place
-            files = state.get("modified_files", [])
+            agent.run(state)
+            files = state.modified_files
             print(f"  Coder: success — modified: {files}")
             return {"step": "coder", "result": "success",
                     "files": list(files)}
         except PatchError as e:
-            state["error"] = str(e)
+            state.error = str(e)
+            logger.error("Coder fatal error: %s", e)
             print(f"  Coder: FAILED — {e}")
             return {"step": "coder", "result": "fatal",
                     "error": str(e)}
 
-    def _do_check(self, state: dict, check_fn, result_key: str,
+    def _do_check(self, state: WorkflowState, check_fn, result_key: str,
                   label: str) -> dict:
         """Run a check (lint or test). Returns history entry."""
-        results = check_fn()
-        state[result_key] = results
+        with log_duration(logger, f"{label} check"):
+            results = check_fn()
+        setattr(state, result_key, results)
         passed = results.get("passed", False)
 
         if passed:
@@ -300,35 +309,38 @@ class Orchestrator:
             return {"step": label, "result": "failed",
                     "output": output[:300]}
 
-    def _do_fix(self, state: dict, trigger: str = None) -> dict:
+    def _do_fix(self, state: WorkflowState, trigger: str = None) -> dict:
         """Run the fixer agent. Returns history entry."""
         try:
             agent = self.get("fixer")
-            agent.run(state)  # mutates state in place
+            agent.run(state)
 
-            if state.get("fix_error"):
-                print(f"  Fixer: FAILED — {state['fix_error']}")
+            if state.fix_error:
+                logger.warning("Fixer failed: %s", state.fix_error)
+                print(f"  Fixer: FAILED — {state.fix_error}")
                 return {"step": "fix", "result": "failed",
                         "trigger": trigger,
-                        "error": state["fix_error"]}
+                        "error": state.fix_error}
 
             print(f"  Fixer: applied patch")
             return {"step": "fix", "result": "success",
                     "trigger": trigger}
         except Exception as e:
-            state["fix_error"] = str(e)
+            state.fix_error = str(e)
+            logger.error("Fixer exception: %s", e)
             print(f"  Fixer: FAILED — {e}")
             return {"step": "fix", "result": "failed",
                     "trigger": trigger, "error": str(e)}
 
-    def _do_review(self, state: dict) -> dict:
+    def _do_review(self, state: WorkflowState) -> dict:
         """Run the reviewer agent. Returns history entry."""
         try:
             agent = self.get("reviewer")
-            agent.run(state)  # mutates state in place
+            agent.run(state)
             print("  Review: complete")
             return {"step": "review", "result": "success"}
         except Exception as e:
+            logger.error("Reviewer exception: %s", e)
             print(f"  Review: WARNING — {e}")
             return {"step": "review", "result": "error",
                     "error": str(e)}
@@ -337,34 +349,28 @@ class Orchestrator:
     # Helpers
     # ------------------------------------------------------------------
 
-    def _infer_trigger(self, state: dict) -> str:
+    def _infer_trigger(self, state: WorkflowState) -> str:
         """Infer what triggered a fix step based on most recent failures."""
-        test_results = state.get("test_results", {})
-        lint_results = state.get("lint_results", {})
-
         # If test has run and failed, it's the trigger
-        if test_results and not test_results.get("passed", True):
+        if state.test_results and not state.test_results.get("passed", True):
             return "test"
         # If lint has run and failed, it's the trigger
-        if lint_results and not lint_results.get("passed", True):
+        if state.lint_results and not state.lint_results.get("passed", True):
             return "lint"
         return "unknown"
 
-    def _print_summary(self, state: dict) -> None:
+    def _print_summary(self, state: WorkflowState) -> None:
         """Print the workflow summary."""
         print("\n" + "=" * 60)
         print("WORKFLOW COMPLETE")
         print("=" * 60)
 
-        test_results = state.get("test_results", {})
-        lint_results = state.get("lint_results", {})
-
-        tests_passed = test_results.get("passed", False) if test_results else False
-        lint_passed = lint_results.get("passed", False) if lint_results else False
+        tests_passed = state.test_results.get("passed", False) if state.test_results else False
+        lint_passed = state.lint_results.get("passed", False) if state.lint_results else False
 
         print(f"  Tests: {'PASSED' if tests_passed else 'FAILED'}")
         print(f"  Lint:  {'PASSED' if lint_passed else 'FAILED'}")
-        print(f"  Files modified: {state.get('modified_files', [])}")
+        print(f"  Files modified: {state.modified_files}")
 
-        if state.get("review"):
-            print(f"\n--- Review ---\n{state['review']}")
+        if state.review:
+            print(f"\n--- Review ---\n{state.review}")

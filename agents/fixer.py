@@ -4,7 +4,11 @@ from llm import call_llm
 from tools.patch import apply_patch, PatchError
 from agents.context import load_repo_context
 from core.agent_base import AgentBase
+from core.state import WorkflowState
+from core.logging_setup import get_logger, log_duration
 import config
+
+logger = get_logger(__name__)
 
 
 class FixerAgent(AgentBase):
@@ -29,29 +33,30 @@ RULES:
     def name(self) -> str:
         return "fixer"
 
-    def run(self, state: dict) -> dict:
+    def run(self, state: WorkflowState) -> WorkflowState:
         """Fix code based on test/lint failures.
 
-        State keys used:
-            - test_results: dict with test output
-            - lint_results: dict with lint output
-            - modified_files: files changed by coder (to focus context)
-        State keys updated:
-            - modified_files: appended with new changes
-            - fix_applied: bool
-            - fix_error: cleared on entry
+        Reads:
+            - state.test_results: test output dict
+            - state.lint_results: lint output dict
+            - state.modified_files: files changed by coder (to focus context)
+        Writes:
+            - state.modified_files: appended with new changes
+            - state.fix_applied: whether fix was applied successfully
+            - state.fix_error: error message if fix failed
+            - state.last_fix_patch: raw patch text from this fix
         """
         # Clear stale fix state from previous phases
-        state.pop("fix_error", None)
-        state.pop("fix_applied", None)
+        state.fix_error = None
+        state.fix_applied = False
 
-        test_results = state.get("test_results", {})
-        lint_results = state.get("lint_results", {})
-        focus_files = state.get("modified_files", None)
+        context = load_repo_context(focus_files=state.modified_files if state.modified_files else None)
 
-        context = load_repo_context(focus_files=focus_files)
+        failures_text = _build_failure_prompt(state.test_results, state.lint_results)
 
-        failures_text = _build_failure_prompt(test_results, lint_results)
+        logger.info("Fixer starting — test_passed=%s, lint_passed=%s",
+                     state.test_results.get("passed") if state.test_results else "N/A",
+                     state.lint_results.get("passed") if state.lint_results else "N/A")
 
         prompt = f"""Repository context:
 {context}
@@ -62,29 +67,34 @@ Failures to fix:
 Generate the minimal unified diff patch to fix these failures."""
 
         for attempt in range(1, config.MAX_RETRIES + 1):
-            patch_text = call_llm(prompt, system=self.SYSTEM_PROMPT)
+            logger.info("Fixer attempt %d/%d", attempt, config.MAX_RETRIES)
+
+            with log_duration(logger, "Fixer LLM call"):
+                patch_text = call_llm(prompt, system=self.SYSTEM_PROMPT)
 
             try:
                 modified = apply_patch(patch_text)
-                existing = state.get("modified_files", [])
+                existing = state.modified_files
                 for f in modified:
                     if f not in existing:
                         existing.append(f)
-                state["modified_files"] = existing
-                state["fix_applied"] = True
-                state["last_fix_patch"] = patch_text
+                state.modified_files = existing
+                state.fix_applied = True
+                state.last_fix_patch = patch_text
+                logger.info("Fixer success — patch applied to %d file(s)", len(modified))
                 return state
             except PatchError as e:
+                logger.warning("Fixer patch failed (attempt %d): %s", attempt, e)
                 if attempt == config.MAX_RETRIES:
-                    state["fix_error"] = str(e)
-                    state["fix_applied"] = False
+                    state.fix_error = str(e)
+                    state.fix_applied = False
                     return state
                 prompt = f"{prompt}\n\nPrevious fix patch failed: {e}\nFix your patch format."
 
         return state
 
 
-def _build_failure_prompt(test_results: dict, lint_results: dict) -> str:
+def _build_failure_prompt(test_results: dict | None, lint_results: dict | None) -> str:
     """Build a clear failure description from test and lint results."""
     parts = []
 

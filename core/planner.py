@@ -11,7 +11,11 @@ The planner uses a hybrid approach:
 import json
 import re
 from llm import call_llm
+from core.state import WorkflowState
+from core.logging_setup import get_logger
 import config
+
+logger = get_logger(__name__)
 
 
 class Planner:
@@ -59,11 +63,11 @@ IMPORTANT:
 Respond with exactly:
 {"step": "<step_name>", "reasoning": "<one sentence explaining why>"}"""
 
-    def decide(self, state: dict, history: list[dict]) -> dict:
+    def decide(self, state: WorkflowState, history: list[dict]) -> dict:
         """Decide the next workflow step.
 
         Args:
-            state: Current workflow state dict.
+            state: Current workflow state.
             history: List of executed steps with their results, e.g.:
                 [{"step": "coder", "result": "success"}, ...]
 
@@ -80,17 +84,19 @@ Respond with exactly:
             response = call_llm(summary, system=self.SYSTEM_PROMPT)
             decision = self._parse(response)
             if decision and self._is_valid_step(decision["step"]):
+                logger.debug("LLM planner chose: %s", decision["step"])
                 return decision
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("LLM planner failed, using default: %s", e)
 
+        logger.debug("Planner default: %s", default["step"])
         return default
 
     # ------------------------------------------------------------------
     # Rule-based default (fallback)
     # ------------------------------------------------------------------
 
-    def _default_next(self, state: dict, history: list[dict]) -> dict:
+    def _default_next(self, state: WorkflowState, history: list[dict]) -> dict:
         """Compute the next step using deterministic rules.
 
         Encodes the standard pipeline logic. Always produces a valid step.
@@ -106,7 +112,7 @@ Respond with exactly:
                              if h["step"] == "fix" and h.get("trigger") == "test")
 
         last_step = history[-1]["step"] if history else None
-        coder_error = state.get("error")
+        coder_error = state.error
 
         # 1. Coder must run first
         if "coder" not in completed:
@@ -157,9 +163,9 @@ Respond with exactly:
     # Helpers
     # ------------------------------------------------------------------
 
-    def _build_summary(self, state: dict, history: list[dict]) -> str:
+    def _build_summary(self, state: WorkflowState, history: list[dict]) -> str:
         """Build a concise state summary for the LLM planner."""
-        parts = [f"Task: {state.get('task', 'N/A')}"]
+        parts = [f"Task: {state.task}"]
 
         if history:
             parts.append("\nExecution history:")
@@ -184,9 +190,8 @@ Respond with exactly:
         parts.append(f"\nCounts: lint_runs={lint_runs}, lint_fixes={lint_fixes}, "
                       f"test_runs={test_runs}, test_fixes={test_fixes}")
 
-        coder_error = state.get("error")
-        if coder_error:
-            parts.append(f"\nCoder error: {coder_error}")
+        if state.error:
+            parts.append(f"\nCoder error: {state.error}")
 
         parts.append(f"\nMax retries per check: {config.MAX_RETRIES}")
 

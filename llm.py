@@ -1,16 +1,28 @@
 """LLM abstraction layer supporting DeepSeek, OpenAI, and Anthropic."""
 
 import config
+from core.logging_setup import get_logger, log_duration
+
+logger = get_logger(__name__)
 
 
 def call_llm(prompt: str, system: str = None) -> str:
-    """Call the configured LLM and return the response text."""
-    if config.LLM_PROVIDER == "anthropic":
-        return _call_anthropic(prompt, system)
-    elif config.LLM_PROVIDER == "deepseek":
-        return _call_deepseek(prompt, system)
-    else:
-        return _call_openai(prompt, system)
+    """Call the configured LLM and return the response text.
+
+    Logs prompt size and call duration for observability.
+    """
+    logger.debug("LLM call — provider=%s, prompt_len=%d", config.LLM_PROVIDER, len(prompt))
+
+    with log_duration(logger, f"LLM call ({config.LLM_PROVIDER})"):
+        if config.LLM_PROVIDER == "anthropic":
+            result = _call_anthropic(prompt, system)
+        elif config.LLM_PROVIDER == "deepseek":
+            result = _call_deepseek(prompt, system)
+        else:
+            result = _call_openai(prompt, system)
+
+    logger.debug("LLM response — len=%d", len(result))
+    return result
 
 
 def _call_deepseek(prompt: str, system: str = None) -> str:

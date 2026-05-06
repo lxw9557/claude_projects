@@ -23,9 +23,13 @@ if sys.platform == "win32":
     os.environ.setdefault("PYTHONIOENCODING", "utf-8")
 
 import config
+from core.logging_setup import setup_logging, get_logger
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.responses import StreamingResponse, HTMLResponse, JSONResponse
 from workflow_runner import run_workflow_stream
+
+setup_logging()
+logger = get_logger(__name__.replace("server", "server"))
 
 app = FastAPI(title="Coding Agent")
 
@@ -58,6 +62,8 @@ async def chat(request: Request):
     if not _workflow_lock.acquire(blocking=False):
         raise HTTPException(409, "Another workflow is already running. Please wait.")
 
+    logger.info("API chat request — task: %s", task)
+
     async def event_stream():
         loop = asyncio.get_event_loop()
         queue: asyncio.Queue = asyncio.Queue()
@@ -65,13 +71,13 @@ async def chat(request: Request):
         def _run():
             try:
                 for event in run_workflow_stream(task, focus_files):
-                    # Schedule the put on the event loop thread (thread-safe)
-                    event_copy = event  # avoid late-binding closure issues
+                    event_copy = event
                     loop.call_soon_threadsafe(
                         lambda e=event_copy: queue.put_nowait(e)
                     )
                 loop.call_soon_threadsafe(lambda: queue.put_nowait(None))
             except Exception as exc:
+                logger.error("Workflow stream error: %s", exc)
                 loop.call_soon_threadsafe(
                     lambda: queue.put_nowait({
                         "type": "step_error",
@@ -90,7 +96,8 @@ async def chat(request: Request):
             event = await queue.get()
             if event is None:
                 break
-            yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
+            # Convert WorkflowState to dict for JSON serialization if needed
+            yield f"data: {json.dumps(event, ensure_ascii=False, default=str)}\n\n"
 
     return StreamingResponse(
         event_stream(),

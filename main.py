@@ -6,9 +6,8 @@ Workflow:
     3. Test -> Fix loop (up to MAX_RETRIES)
     4. Reviewer Agent: final code review
 
-Phase 2: Agents are now direct AgentBase subclasses.
-The orchestrator drives the same 4-step pipeline through
-registered AgentBase instances, enabling future extensibility.
+Agents are AgentBase subclasses registered with the Orchestrator.
+The Planner dynamically decides each step.
 """
 
 import sys
@@ -22,6 +21,7 @@ if sys.platform == "win32":
     os.environ.setdefault("PYTHONIOENCODING", "utf-8")
 
 from core.orchestrator import Orchestrator
+from core.logging_setup import setup_logging
 from agents.coder import CoderAgent
 from agents.fixer import FixerAgent
 from agents.reviewer import ReviewerAgent
@@ -46,6 +46,7 @@ def run_workflow(task: str, focus_files: list[str] = None) -> dict:
     Returns:
         Final state dict with results.
     """
+    setup_logging()
     orch = _build_orchestrator()
     return orch.run_workflow(task, focus_files)
 

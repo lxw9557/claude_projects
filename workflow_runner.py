@@ -1,10 +1,10 @@
 """Event-emitting workflow generator for the web UI.
 
-Phase 2: Agents are now direct AgentBase subclasses.
 Delegates to Orchestrator.run_workflow_stream().
 """
 
 from core.orchestrator import Orchestrator
+from core.logging_setup import setup_logging
 from agents.coder import CoderAgent
 from agents.fixer import FixerAgent
 from agents.reviewer import ReviewerAgent
@@ -30,6 +30,9 @@ def run_workflow_stream(task: str, focus_files: list[str] = None):
         {"type": "step_start", "step": "fix_...", "message": "...", "iteration": N}
         {"type": "step_done", "step": "review", "review": "..."}
         {"type": "done", "state": {...}}
+
+    The final 'done' event's state is now a WorkflowState dataclass instance.
     """
+    setup_logging()
     orch = _build_orchestrator()
     yield from orch.run_workflow_stream(task, focus_files)

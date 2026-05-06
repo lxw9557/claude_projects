@@ -3,6 +3,10 @@
 from llm import call_llm
 from agents.context import load_repo_context
 from core.agent_base import AgentBase
+from core.state import WorkflowState
+from core.logging_setup import get_logger, log_duration
+
+logger = get_logger(__name__)
 
 
 class ReviewerAgent(AgentBase):
@@ -20,37 +24,37 @@ RULES:
     def name(self) -> str:
         return "reviewer"
 
-    def run(self, state: dict) -> dict:
+    def run(self, state: WorkflowState) -> WorkflowState:
         """Review the current state of code.
 
-        State keys used:
-            - task: the original task
-            - test_results: test output
-            - modified_files: files that were changed
-        State keys updated:
-            - review: review text from LLM
+        Reads:
+            - state.task: the original task
+            - state.test_results: test output
+            - state.modified_files: files that were changed
+        Writes:
+            - state.review: review text from LLM
         """
-        task = state.get("task", "")
-        test_results = state.get("test_results", {})
-        focus_files = state.get("modified_files", None)
+        context = load_repo_context(focus_files=state.modified_files if state.modified_files else None)
 
-        context = load_repo_context(focus_files=focus_files)
+        test_output = f"{state.test_results.get('stdout', 'No tests run')}\n{state.test_results.get('stderr', '')}" if state.test_results else "No tests run"
 
         prompt = f"""Repository context (focus on recent changes):
 {context}
 
 Original task:
-{task}
+{state.task}
 
 Test results:
-{test_results.get('stdout', 'No tests run')}
-{test_results.get('stderr', '')}
+{test_output}
 
 Review the implementation. Return:
 1. Issues found (if any)
 2. Suggestions for improvement
 3. Overall assessment (pass/fail/needs-work)"""
 
-        review = call_llm(prompt, system=self.SYSTEM_PROMPT)
-        state["review"] = review
+        with log_duration(logger, "Reviewer LLM call"):
+            review = call_llm(prompt, system=self.SYSTEM_PROMPT)
+
+        state.review = review
+        logger.info("Review complete — %d chars", len(review))
         return state

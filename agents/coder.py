@@ -4,7 +4,11 @@ from llm import call_llm
 from tools.patch import apply_patch, PatchError
 from agents.context import load_repo_context
 from core.agent_base import AgentBase
+from core.state import WorkflowState
+from core.logging_setup import get_logger, log_duration
 import config
+
+logger = get_logger(__name__)
 
 
 class CoderAgent(AgentBase):
@@ -32,38 +36,40 @@ RULES:
     def name(self) -> str:
         return "coder"
 
-    def run(self, state: dict) -> dict:
+    def run(self, state: WorkflowState) -> WorkflowState:
         """Generate code to implement a task.
 
-        State keys used:
-            - task: description of what to build/fix
-            - focus_files (optional): list of files to focus on
-        State keys added:
-            - modified_files: list of files changed
-            - patch: the raw patch text
+        Reads:
+            - state.task: description of what to build/fix
+            - state.focus_files (optional): list of files to focus on
+        Writes:
+            - state.modified_files: list of files changed
+            - state.patch: the raw patch text
         """
-        task = state.get("task", "")
-        focus_files = state.get("focus_files", None)
-
-        context = load_repo_context(focus_files=focus_files)
+        context = load_repo_context(focus_files=state.focus_files)
 
         prompt = f"""Repository context:
 {context}
 
 Task:
-{task}
+{state.task}
 
 Generate the minimal unified diff patch to implement this task."""
 
         for attempt in range(1, config.MAX_RETRIES + 1):
-            patch_text = call_llm(prompt, system=self.SYSTEM_PROMPT)
+            logger.info("Coder attempt %d/%d", attempt, config.MAX_RETRIES)
+
+            with log_duration(logger, "Coder LLM call"):
+                patch_text = call_llm(prompt, system=self.SYSTEM_PROMPT)
 
             try:
                 modified = apply_patch(patch_text)
-                state["modified_files"] = modified
-                state["patch"] = patch_text
+                state.modified_files = modified
+                state.patch = patch_text
+                logger.info("Coder success — modified %d file(s): %s", len(modified), modified)
                 return state
             except PatchError as e:
+                logger.warning("Coder patch failed (attempt %d): %s", attempt, e)
                 if attempt == config.MAX_RETRIES:
                     raise
                 prompt = f"{prompt}\n\nPrevious attempt failed with error: {e}\nPlease fix your patch format and try again."
