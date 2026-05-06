@@ -6,6 +6,7 @@ Endpoints:
     GET  /api/files         List workspace files
     GET  /api/files/{path}  Read a file with line numbers
     GET  /api/diff          Get git diff of workspace
+    GET  /api/logs          View recent agent logs (last N lines)
 """
 
 import asyncio
@@ -23,13 +24,14 @@ if sys.platform == "win32":
     os.environ.setdefault("PYTHONIOENCODING", "utf-8")
 
 import config
-from core.logging_setup import setup_logging, get_logger
+from core.logging_setup import setup_logging, get_logger, get_log_file
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.responses import StreamingResponse, HTMLResponse, JSONResponse
 from workflow_runner import run_workflow_stream
 
 setup_logging()
-logger = get_logger(__name__.replace("server", "server"))
+logger = get_logger("server")
+logger.info("Server started, log file initialized")
 
 app = FastAPI(title="Coding Agent")
 
@@ -167,6 +169,26 @@ async def get_diff():
         return JSONResponse({"diff": f"Error running git diff: {e}"})
 
     return JSONResponse({"diff": result.stdout or "No changes detected."})
+
+
+@app.get("/api/logs")
+async def view_logs(lines: int = 200):
+    """Return the last N lines of the agent log file.
+
+    Args:
+        lines: Number of recent log lines to return (default 200).
+    """
+    log_path = get_log_file()
+    if log_path is None or not log_path.exists():
+        return JSONResponse({"lines": [], "message": "No log file found — logging may not be initialized."})
+
+    try:
+        content = log_path.read_text(encoding="utf-8")
+        all_lines = content.strip().splitlines()
+        recent = all_lines[-lines:] if len(all_lines) > lines else all_lines
+        return JSONResponse({"lines": recent, "path": str(log_path)})
+    except Exception as e:
+        return JSONResponse({"lines": [], "error": str(e)})
 
 
 # ---------------------------------------------------------------------------
