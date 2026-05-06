@@ -19,6 +19,11 @@ python server.py
 
 # 运行工作区测试
 cd workspace && python -m pytest -v --tb=short
+
+# 运行单个测试
+cd workspace && python -m pytest -v --tb=short test_math_utils.py::TestAdd::test_positive
+
+# Lint 检查
 cd workspace && python -m flake8 --max-line-length=120 .
 ```
 
@@ -50,6 +55,25 @@ cd workspace && python -m flake8 --max-line-length=120 .
 ### Web 服务 (`server.py`)
 
 FastAPI 应用，提供 4 个端点：`/` (SPA), `/api/chat` (SSE 流), `/api/files` (列出文件), `/api/files/{path}` (读取文件), `/api/diff` (git diff)。使用 `threading.Lock` 防止并发工作流。同步工作流在线程池中执行，通过 `asyncio.Queue` 桥接到 SSE。
+
+## 环境变量速查
+
+| 变量 | 说明 | 默认值 |
+|------|------|--------|
+| `CODING_AGENT_LLM_PROVIDER` | LLM 提供商：`deepseek` / `openai` / `anthropic` | `deepseek` |
+| `DEEPSEEK_API_KEY` | DeepSeek API key | - |
+| `OPENAI_API_KEY` | OpenAI API key | - |
+| `ANTHROPIC_API_KEY` | Anthropic API key | - |
+| `CODING_AGENT_DEEPSEEK_MODEL` | DeepSeek 模型名 | `deepseek-chat` |
+| `CODING_AGENT_WORKSPACE` | 工作区路径 | `./workspace` |
+| `ANTHROPIC_BASE_URL` | 自定义 API 端点（用于代理/中转） | - |
+
+## 目录说明
+
+- `agents/`, `core/`, `tools/` — Agent 系统源代码
+- `workspace/` — **被 Agent 修改的目标仓库**（示例代码），非 agent 源码的一部分；所有 patch 应用、测试、lint 均在此目录执行
+- `static/` — Web UI 前端（单页 HTML）
+- `coding_agent.md` — 原始设计文档，非运行时依赖
 
 ## 重要实现细节
 
