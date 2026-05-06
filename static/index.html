@@ -1,0 +1,835 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Coding Agent</title>
+<style>
+/* ===================================================================
+   Reset & Base
+   =================================================================== */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --bg: #1e1e2e;
+  --bg-alt: #181825;
+  --bg-card: #262637;
+  --border: #313244;
+  --text: #cdd6f4;
+  --text-muted: #6c7086;
+  --text-dim: #45475a;
+  --accent: #89b4fa;
+  --green: #a6e3a1;
+  --red: #f38ba8;
+  --yellow: #f9e2af;
+  --blue-bubble: #2d5ba6;
+  --font-mono: 'Cascadia Code', 'Fira Code', 'JetBrains Mono', 'Consolas', monospace;
+  --font-sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+  --radius: 8px;
+}
+
+html, body { height: 100%; overflow: hidden; }
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-sans);
+  display: flex;
+}
+
+/* ===================================================================
+   Layout
+   =================================================================== */
+#app {
+  display: flex;
+  width: 100%;
+  height: 100%;
+}
+
+/* ---- Sidebar (Chat Panel) ---- */
+#sidebar {
+  width: 38%;
+  min-width: 360px;
+  max-width: 520px;
+  display: flex;
+  flex-direction: column;
+  border-right: 1px solid var(--border);
+  background: var(--bg-alt);
+}
+
+#header {
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 15px;
+  font-weight: 600;
+  user-select: none;
+}
+
+#header .dot {
+  width: 8px; height: 8px;
+  border-radius: 50%;
+  background: var(--green);
+  flex-shrink: 0;
+}
+#header .dot.running { background: var(--yellow); animation: pulse 1s infinite; }
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.3; }
+}
+
+#chat {
+  flex: 1;
+  overflow-y: auto;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+#chat::-webkit-scrollbar { width: 6px; }
+#chat::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+
+/* ---- Messages ---- */
+.msg {
+  max-width: 92%;
+  padding: 10px 14px;
+  border-radius: var(--radius);
+  font-size: 13.5px;
+  line-height: 1.55;
+  word-break: break-word;
+  animation: fadeIn 0.2s;
+}
+
+@keyframes fadeIn { from { opacity: 0; transform: translateY(4px); } }
+
+.msg.user {
+  align-self: flex-end;
+  background: var(--blue-bubble);
+  color: #fff;
+  border-bottom-right-radius: 3px;
+}
+
+.msg.info {
+  align-self: flex-start;
+  background: var(--bg-card);
+  color: var(--text-muted);
+  font-size: 12.5px;
+  text-align: center;
+  max-width: 100%;
+  border-radius: 6px;
+  padding: 6px 12px;
+}
+
+/* ---- Progress Card ---- */
+.progress-card {
+  align-self: flex-start;
+  width: 100%;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 0;
+  overflow: hidden;
+  animation: fadeIn 0.2s;
+}
+
+.progress-card .row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+}
+
+.progress-card .icon {
+  width: 18px; height: 18px;
+  flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 13px;
+}
+
+.progress-card .label { font-size: 13px; flex: 1; }
+.progress-card .status { font-size: 11px; color: var(--text-muted); }
+
+.progress-card .detail {
+  font-size: 11.5px;
+  color: var(--text-muted);
+  padding: 0 12px 8px 40px;
+  white-space: pre-wrap;
+  max-height: 100px;
+  overflow-y: auto;
+  font-family: var(--font-mono);
+}
+
+.progress-card.done { border-left: 3px solid var(--green); }
+.progress-card.failed { border-left: 3px solid var(--red); }
+.progress-card.active { border-left: 3px solid var(--yellow); }
+
+.progress-card .icon.ok { color: var(--green); }
+.progress-card .icon.err { color: var(--red); }
+.progress-card .icon.spin {
+  width: 14px; height: 14px;
+  border: 2px solid var(--border);
+  border-top-color: var(--yellow);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* ---- Summary Card ---- */
+.summary-card {
+  align-self: flex-start;
+  width: 100%;
+  background: var(--bg-card);
+  border: 1px solid var(--green);
+  border-radius: var(--radius);
+  padding: 12px;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.summary-card h4 {
+  font-size: 13px;
+  margin-bottom: 6px;
+  color: var(--green);
+}
+
+.summary-card .review-text {
+  max-height: 150px;
+  overflow-y: auto;
+  margin-top: 6px;
+  font-size: 12px;
+  color: var(--text-muted);
+  white-space: pre-wrap;
+}
+
+/* ---- Input Area ---- */
+#input-area {
+  padding: 10px 12px;
+  border-top: 1px solid var(--border);
+  display: flex;
+  gap: 8px;
+}
+
+#input-area textarea {
+  flex: 1;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text);
+  font-family: var(--font-sans);
+  font-size: 13.5px;
+  padding: 10px 12px;
+  resize: none;
+  min-height: 42px;
+  max-height: 120px;
+  outline: none;
+  transition: border-color 0.15s;
+}
+#input-area textarea:focus { border-color: var(--accent); }
+#input-area textarea::placeholder { color: var(--text-dim); }
+
+#input-area button {
+  background: var(--accent);
+  color: var(--bg);
+  border: none;
+  border-radius: var(--radius);
+  padding: 0 16px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: opacity 0.15s;
+  white-space: nowrap;
+}
+#input-area button:hover { opacity: 0.85; }
+#input-area button:disabled { opacity: 0.4; cursor: not-allowed; }
+
+/* ---- Content Panel ---- */
+#content {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+#tabs {
+  display: flex;
+  border-bottom: 1px solid var(--border);
+  padding: 0 12px;
+  gap: 0;
+  flex-shrink: 0;
+}
+
+#tabs button {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  padding: 10px 16px;
+  font-size: 13px;
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  transition: 0.15s;
+  font-family: var(--font-sans);
+}
+#tabs button:hover { color: var(--text); }
+#tabs button.active { color: var(--accent); border-bottom-color: var(--accent); }
+
+#content-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 0;
+}
+
+#content-body::-webkit-scrollbar { width: 6px; }
+#content-body::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+
+/* ---- File Tree ---- */
+#files-panel { display: block; }
+#diff-panel { display: none; }
+
+.file-tree { padding: 8px 0; }
+
+.file-item {
+  padding: 5px 16px;
+  font-size: 13px;
+  cursor: pointer;
+  font-family: var(--font-mono);
+  color: var(--text-muted);
+  transition: 0.1s;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.file-item:hover { background: var(--bg-card); color: var(--text); }
+.file-item.selected { background: var(--bg-card); color: var(--accent); }
+
+/* ---- File Viewer ---- */
+#file-viewer {
+  margin: 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+
+#file-viewer .file-header {
+  padding: 8px 14px;
+  background: var(--bg-card);
+  border-bottom: 1px solid var(--border);
+  font-size: 12px;
+  font-family: var(--font-mono);
+  color: var(--text-muted);
+  display: flex; justify-content: space-between; align-items: center;
+}
+
+#file-viewer .file-header .close-btn {
+  background: none; border: none; color: var(--text-muted);
+  cursor: pointer; font-size: 16px; padding: 0 4px;
+}
+#file-viewer .file-header .close-btn:hover { color: var(--text); }
+
+#file-viewer .code-body {
+  display: flex;
+  max-height: calc(100vh - 160px);
+  overflow: auto;
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+}
+
+.line-numbers {
+  padding: 6px 0;
+  text-align: right;
+  user-select: none;
+  background: var(--bg-alt);
+  border-right: 1px solid var(--border);
+  min-width: 44px;
+}
+
+.line-numbers span {
+  display: block;
+  padding: 0 10px 0 6px;
+  color: var(--text-dim);
+  font-size: 11.5px;
+  line-height: 1.65;
+}
+
+.code-lines {
+  flex: 1;
+  padding: 6px 0;
+  overflow-x: auto;
+}
+
+.code-lines pre {
+  padding: 0 14px;
+  margin: 0;
+  line-height: 1.65;
+  white-space: pre;
+  color: var(--text);
+}
+
+/* ---- Diff Viewer ---- */
+.diff-viewer {
+  margin: 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  max-height: calc(100vh - 80px);
+  overflow-y: auto;
+}
+
+.diff-viewer pre {
+  margin: 0;
+  padding: 8px 14px;
+  line-height: 1.65;
+  white-space: pre-wrap;
+}
+
+.diff-line {
+  padding: 1px 14px;
+  line-height: 1.65;
+  white-space: pre-wrap;
+}
+
+.diff-line.add { background: rgba(166, 227, 161, 0.1); color: var(--green); }
+.diff-line.del { background: rgba(243, 139, 168, 0.1); color: var(--red); }
+.diff-line.header { color: var(--accent); font-weight: 600; }
+.diff-line.hunk { color: var(--yellow); }
+.diff-line.ctx { color: var(--text-muted); }
+
+/* ---- Empty State ---- */
+.empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  color: var(--text-dim);
+  font-size: 14px;
+  gap: 6px;
+}
+
+.empty-state .icon { font-size: 36px; opacity: 0.3; }
+
+/* ---- Responsive ---- */
+@media (max-width: 700px) {
+  #app { flex-direction: column; }
+  #sidebar { width: 100%; max-width: 100%; min-width: 0; height: 55%; }
+  #content { height: 45%; }
+}
+</style>
+</head>
+<body>
+
+<div id="app">
+  <!-- ====== Sidebar: Chat ====== -->
+  <div id="sidebar">
+    <div id="header">
+      <span class="dot" id="status-dot"></span>
+      <span>Coding Agent</span>
+    </div>
+
+    <div id="chat">
+      <div class="msg info">输入任务描述，代理将自动编写代码、运行测试和审查</div>
+    </div>
+
+    <div id="input-area">
+      <textarea id="task-input" rows="1"
+        placeholder="描述你想要实现的功能..."
+        onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendTask()}"></textarea>
+      <button id="send-btn" onclick="sendTask()">发送</button>
+    </div>
+  </div>
+
+  <!-- ====== Content Panel ====== -->
+  <div id="content">
+    <div id="tabs">
+      <button class="active" onclick="switchTab('files')">Files</button>
+      <button onclick="switchTab('diff')">Diff</button>
+    </div>
+
+    <div id="content-body">
+      <div id="files-panel">
+        <div class="file-tree" id="file-tree"></div>
+        <div id="file-viewer" style="display:none"></div>
+      </div>
+      <div id="diff-panel">
+        <div class="diff-viewer" id="diff-content"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+// =========================================================================
+// State
+// =========================================================================
+let currentFile = null;
+let activeProgressCards = {};  // step_name -> DOM element
+let running = false;
+
+// =========================================================================
+// Init
+// =========================================================================
+document.addEventListener('DOMContentLoaded', () => {
+  loadFiles();
+  loadDiff();
+});
+
+// =========================================================================
+// File Tree
+// =========================================================================
+async function loadFiles() {
+  try {
+    const res = await fetch('/api/files');
+    const data = await res.json();
+    const tree = document.getElementById('file-tree');
+    tree.innerHTML = data.files.map(f =>
+      `<div class="file-item" onclick="openFile('${escapeHtml(f)}')" title="${escapeHtml(f)}">
+        ${fileIcon(f)} ${escapeHtml(f)}
+      </div>`
+    ).join('');
+  } catch(e) {
+    console.error('Failed to load files:', e);
+  }
+}
+
+function fileIcon(name) {
+  const ext = name.split('.').pop();
+  const icons = { py: '🐍', js: '📜', ts: '🔷', jsx: '⚛️', tsx: '⚛️', rs: '🦀', go: '🔵', java: '☕', c: '⚙️', cpp: '⚙️', h: '📋', css: '🎨', html: '🌐', json: '📋', md: '📝', yaml: '📋', yml: '📋', toml: '📋' };
+  return icons[ext] || '📄';
+}
+
+async function openFile(path) {
+  currentFile = path;
+  try {
+    const res = await fetch('/api/files/' + encodeURIComponent(path));
+    if (!res.ok) { alert('Failed to load file: ' + path); return; }
+    const data = await res.json();
+
+    // Highlight selection in file tree
+    document.querySelectorAll('.file-item').forEach(el => {
+      el.classList.toggle('selected', el.textContent.trim().endsWith(path));
+    });
+
+    const viewer = document.getElementById('file-viewer');
+    viewer.style.display = 'block';
+    viewer.innerHTML = `
+      <div class="file-header">
+        <span>${escapeHtml(path)}</span>
+        <button class="close-btn" onclick="closeFileViewer()">×</button>
+      </div>
+      <div class="code-body">
+        <div class="line-numbers">${data.lines.map(l => `<span>${l.num}</span>`).join('')}</div>
+        <div class="code-lines"><pre>${escapeHtml(data.content)}</pre></div>
+      </div>`;
+  } catch(e) {
+    console.error('Failed to open file:', e);
+  }
+}
+
+function closeFileViewer() {
+  currentFile = null;
+  document.getElementById('file-viewer').style.display = 'none';
+  document.querySelectorAll('.file-item').forEach(el => el.classList.remove('selected'));
+}
+
+// =========================================================================
+// Diff Viewer
+// =========================================================================
+async function loadDiff() {
+  try {
+    const res = await fetch('/api/diff');
+    const data = await res.json();
+    renderDiff(data.diff);
+  } catch(e) {
+    console.error('Failed to load diff:', e);
+  }
+}
+
+function renderDiff(text) {
+  const el = document.getElementById('diff-content');
+  if (!text || text === 'No changes detected.') {
+    el.innerHTML = '<div class="empty-state"><span class="icon">✓</span>No changes in workspace</div>';
+    return;
+  }
+  const lines = text.split('\n');
+  el.innerHTML = lines.map(line => {
+    let cls = 'ctx';
+    if (line.startsWith('diff --git')) cls = 'header';
+    else if (line.startsWith('---') || line.startsWith('+++')) cls = 'header';
+    else if (line.startsWith('@@')) cls = 'hunk';
+    else if (line.startsWith('+')) cls = 'add';
+    else if (line.startsWith('-')) cls = 'del';
+    return `<div class="diff-line ${cls}">${escapeHtml(line)}</div>`;
+  }).join('');
+}
+
+// =========================================================================
+// Tabs
+// =========================================================================
+function switchTab(tab) {
+  document.querySelectorAll('#tabs button').forEach(b => b.classList.remove('active'));
+  document.querySelector(`#tabs button${tab==='files' ? ':first-child' : ':last-child'}`).classList.add('active');
+  document.getElementById('files-panel').style.display = tab === 'files' ? 'block' : 'none';
+  document.getElementById('diff-panel').style.display = tab === 'diff' ? 'block' : 'none';
+  if (tab === 'diff') loadDiff();
+}
+
+// =========================================================================
+// Chat: Send Task
+// =========================================================================
+async function sendTask() {
+  const input = document.getElementById('task-input');
+  const task = input.value.trim();
+  if (!task || running) return;
+
+  running = true;
+  input.value = '';
+  input.style.height = 'auto';
+  document.getElementById('send-btn').disabled = true;
+  document.getElementById('status-dot').classList.add('running');
+  activeProgressCards = {};
+
+  addMessage('user', task);
+
+  try {
+    const response = await fetch('/api/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ task })
+    });
+
+    if (response.status === 409) {
+      addMessage('info', '已有任务正在运行，请等待完成...');
+      resetInput();
+      return;
+    }
+
+    if (!response.ok) {
+      const errText = await response.text();
+      addErrorCard('chat', 'Request failed: ' + errText);
+      resetInput();
+      return;
+    }
+
+    await streamEvents(response);
+  } catch(e) {
+    addErrorCard('chat', 'Connection error: ' + e.message);
+    resetInput();
+  }
+}
+
+// =========================================================================
+// SSE Streaming
+// =========================================================================
+async function streamEvents(response) {
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+
+    buffer += decoder.decode(value, { stream: true });
+    const parts = buffer.split('\n\n');
+    buffer = parts.pop();  // keep incomplete last part
+
+    for (const part of parts) {
+      const lines = part.split('\n');
+      for (const line of lines) {
+        if (line.startsWith('data: ')) {
+          try {
+            const event = JSON.parse(line.slice(6));
+            handleEvent(event);
+          } catch(e) {}
+        }
+      }
+    }
+  }
+
+  // Process remaining buffer
+  if (buffer.trim()) {
+    const lines = buffer.split('\n');
+    for (const line of lines) {
+      if (line.startsWith('data: ')) {
+        try { handleEvent(JSON.parse(line.slice(6))); } catch(e) {}
+      }
+    }
+  }
+
+  resetInput();
+}
+
+function handleEvent(event) {
+  const type = event.type;
+  const step = event.step;
+
+  switch (type) {
+    case 'step_start':
+      if (step === 'workflow') {
+        addMessage('info', event.message);
+      } else {
+        addProgressCard(step, event.message, event.iteration);
+      }
+      break;
+
+    case 'step_done':
+      if (step === 'coder') {
+        finishProgressCard(step, 'done', `完成 — 修改了 ${(event.modified_files || []).length} 个文件`);
+        if (event.modified_files && event.modified_files.length > 0) {
+          addProgressDetail(step, '修改文件: ' + event.modified_files.join(', '));
+        }
+      } else if (step === 'review') {
+        finishProgressCard(step, 'done', '审查完成');
+        addSummaryCard(event.review, event.state);
+      }
+      break;
+
+    case 'step_error':
+      finishProgressCard(step, 'failed', event.error);
+      break;
+
+    case 'check_result':
+      if (event.passed) {
+        finishProgressCard('check_' + event.check, 'done',
+          `${event.check === 'lint' ? 'Lint' : 'Tests'} 通过 (尝试 ${event.iteration} 次)`);
+      } else {
+        finishProgressCard('check_' + event.check, 'failed',
+          `${event.check === 'lint' ? 'Lint' : 'Tests'} 失败 (尝试 ${event.iteration} 次)`);
+        if (event.output) {
+          addProgressDetail('check_' + event.check, event.output);
+        }
+      }
+      break;
+
+    case 'done':
+      loadFiles();
+      loadDiff();
+      break;
+  }
+}
+
+// =========================================================================
+// DOM Helpers
+// =========================================================================
+function addMessage(type, text) {
+  const chat = document.getElementById('chat');
+  const div = document.createElement('div');
+  div.className = 'msg ' + type;
+  div.textContent = text;
+  chat.appendChild(div);
+  scrollChat();
+  return div;
+}
+
+function addProgressCard(step, message, iteration) {
+  const chat = document.getElementById('chat');
+  const suffix = iteration ? `_${iteration}` : '';
+  const cardId = step + suffix;
+
+  const card = document.createElement('div');
+  card.className = 'progress-card active';
+  card.id = 'card-' + cardId;
+  card.innerHTML = `
+    <div class="row">
+      <span class="icon spin"></span>
+      <span class="label">${escapeHtml(message)}</span>
+      <span class="status">运行中...</span>
+    </div>`;
+  chat.appendChild(card);
+  scrollChat();
+  activeProgressCards[cardId] = card;
+  return card;
+}
+
+function finishProgressCard(step, status, message) {
+  const card = activeProgressCards[step];
+  if (!card) return;
+
+  card.classList.remove('active');
+  card.classList.add(status === 'done' ? 'done' : 'failed');
+
+  const icon = card.querySelector('.icon');
+  icon.classList.remove('spin');
+  if (status === 'done') {
+    icon.classList.add('ok');
+    icon.textContent = '✓';
+  } else {
+    icon.classList.add('err');
+    icon.textContent = '✗';
+  }
+
+  card.querySelector('.status').textContent = message;
+  scrollChat();
+}
+
+function addProgressDetail(step, text) {
+  const card = activeProgressCards[step];
+  if (!card) return;
+
+  let detail = card.querySelector('.detail');
+  if (!detail) {
+    detail = document.createElement('div');
+    detail.className = 'detail';
+    card.appendChild(detail);
+  }
+  detail.textContent = text;
+  scrollChat();
+}
+
+function addErrorCard(step, error) {
+  addProgressCard(step, 'Error', 0);
+  finishProgressCard(step, 'failed', error);
+}
+
+function addSummaryCard(review, state) {
+  const chat = document.getElementById('chat');
+  const testResults = state?.test_results || {};
+  const lintResults = state?.lint_results || {};
+  const files = state?.modified_files || [];
+
+  const testsPassed = testResults.passed ? '✓' : '✗';
+  const lintPassed = lintResults.passed ? '✓' : '✗';
+
+  const card = document.createElement('div');
+  card.className = 'summary-card';
+  card.innerHTML = `
+    <h4>工作流完成</h4>
+    <div>Tests: ${testsPassed} &nbsp;&nbsp; Lint: ${lintPassed}</div>
+    <div>修改文件: ${files.length > 0 ? files.join(', ') : '无'}</div>
+    ${review ? `<div class="review-text">${escapeHtml(review)}</div>` : ''}`;
+  chat.appendChild(card);
+  scrollChat();
+}
+
+function scrollChat() {
+  const chat = document.getElementById('chat');
+  chat.scrollTop = chat.scrollHeight;
+}
+
+function resetInput() {
+  running = false;
+  document.getElementById('send-btn').disabled = false;
+  document.getElementById('status-dot').classList.remove('running');
+  document.getElementById('task-input').focus();
+}
+
+function escapeHtml(str) {
+  const div = document.createElement('div');
+  div.textContent = str;
+  return div.innerHTML;
+}
+
+// Auto-resize textarea
+document.getElementById('task-input').addEventListener('input', function() {
+  this.style.height = 'auto';
+  this.style.height = Math.min(this.scrollHeight, 120) + 'px';
+});
+</script>
+
+</body>
+</html>
