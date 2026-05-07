@@ -432,7 +432,7 @@ body {
     </div>
 
     <div id="chat">
-      <div class="msg info">输入任务描述，代理将自动编写代码、运行测试和审查</div>
+      <div class="msg info" id="welcome-msg">输入任务描述，代理将自动编写代码、运行测试和审查</div>
     </div>
 
     <div id="input-area">
@@ -463,6 +463,26 @@ body {
 </div>
 
 <script>
+// =========================================================================
+// UI 文本配置 — 所有用户可见字符串集中管理
+// =========================================================================
+const TEXT = {
+  welcome: '输入任务描述，代理将自动编写代码、运行测试和审查',
+  placeholder: '描述你想要实现的功能...',
+  busy: '已有任务正在运行，请等待完成...',
+  running: '运行中...',
+  coderDone: (n) => `完成 — 修改了 ${n} 个文件`,
+  modifiedFiles: (files) => '修改文件: ' + files.join(', '),
+  reviewDone: '审查完成',
+  lint: 'Lint',
+  tests: 'Tests',
+  passed: (label, n) => `${label} 通过 (尝试 ${n} 次)`,
+  failed: (label, n) => `${label} 失败 (尝试 ${n} 次)`,
+  workflowComplete: '工作流完成',
+  noFiles: '无',
+  send: '发送',
+};
+
 // =========================================================================
 // State
 // =========================================================================
@@ -603,7 +623,7 @@ async function sendTask() {
     });
 
     if (response.status === 409) {
-      addMessage('info', '已有任务正在运行，请等待完成...');
+      addMessage('info', TEXT.busy);
       resetInput();
       return;
     }
@@ -679,12 +699,12 @@ function handleEvent(event) {
 
     case 'step_done':
       if (step === 'coder') {
-        finishProgressCard(step, 'done', `完成 — 修改了 ${(event.modified_files || []).length} 个文件`);
+        finishProgressCard(step, 'done', TEXT.coderDone((event.modified_files || []).length));
         if (event.modified_files && event.modified_files.length > 0) {
-          addProgressDetail(step, '修改文件: ' + event.modified_files.join(', '));
+          addProgressDetail(step, TEXT.modifiedFiles(event.modified_files));
         }
       } else if (step === 'review') {
-        finishProgressCard(step, 'done', '审查完成');
+        finishProgressCard(step, 'done', TEXT.reviewDone);
         addSummaryCard(event.review, event.state);
       }
       break;
@@ -696,10 +716,10 @@ function handleEvent(event) {
     case 'check_result':
       if (event.passed) {
         finishProgressCard('check_' + event.check, 'done',
-          `${event.check === 'lint' ? 'Lint' : 'Tests'} 通过 (尝试 ${event.iteration} 次)`);
+          TEXT.passed(event.check === 'lint' ? TEXT.lint : TEXT.tests, event.iteration));
       } else {
         finishProgressCard('check_' + event.check, 'failed',
-          `${event.check === 'lint' ? 'Lint' : 'Tests'} 失败 (尝试 ${event.iteration} 次)`);
+          TEXT.failed(event.check === 'lint' ? TEXT.lint : TEXT.tests, event.iteration));
         if (event.output) {
           addProgressDetail('check_' + event.check, event.output);
         }
@@ -738,7 +758,7 @@ function addProgressCard(step, message, iteration) {
     <div class="row">
       <span class="icon spin"></span>
       <span class="label">${escapeHtml(message)}</span>
-      <span class="status">运行中...</span>
+      <span class="status">${TEXT.running}</span>
     </div>`;
   chat.appendChild(card);
   scrollChat();
@@ -798,9 +818,9 @@ function addSummaryCard(review, state) {
   const card = document.createElement('div');
   card.className = 'summary-card';
   card.innerHTML = `
-    <h4>工作流完成</h4>
+    <h4>${TEXT.workflowComplete}</h4>
     <div>Tests: ${testsPassed} &nbsp;&nbsp; Lint: ${lintPassed}</div>
-    <div>修改文件: ${files.length > 0 ? files.join(', ') : '无'}</div>
+    <div>${TEXT.modifiedFiles(files.length > 0 ? files : [TEXT.noFiles])}</div>
     ${review ? `<div class="review-text">${escapeHtml(review)}</div>` : ''}`;
   chat.appendChild(card);
   scrollChat();

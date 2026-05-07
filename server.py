@@ -37,7 +37,9 @@ app = FastAPI(title="Coding Agent")
 
 STATIC_DIR = Path(__file__).parent / "static"
 
-# Prevent concurrent workflows from corrupting the workspace
+# 全局锁 — 防止并发工作流损坏共享工作区。
+# 当前设计为每个进程一个工作区，并发修改会导致文件冲突。
+# 未来可通过 per-request 工作区副本（git worktree 或临时目录）支持并发。
 _workflow_lock = threading.Lock()
 
 
