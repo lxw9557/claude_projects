@@ -5,13 +5,13 @@ Phase 3: Uses a Planner to dynamically decide each next step instead of
          decide→execute→record loop until the Planner says "done".
 """
 
+from config import Config, get_config
 from core.agent_base import AgentBase
 from core.planner import Planner
 from core.state import WorkflowState
 from core.logging_setup import get_logger, log_duration
 from tools.tester import run_tests, run_lint
 from tools.patch import PatchError
-import config
 
 logger = get_logger(__name__)
 
@@ -22,12 +22,16 @@ class Orchestrator:
     Agents are registered by name. The Planner examines the current state
     and execution history after each step and decides what to do next.
     Both synchronous (CLI) and streaming (Web UI) execution are supported.
+
+    Args:
+        cfg: Optional Config instance for dependency injection.
     """
 
     # Safety limit — prevents infinite loops
     MAX_STEPS = 25
 
-    def __init__(self):
+    def __init__(self, cfg: Config = None):
+        self.cfg = cfg or get_config()
         self._agents: dict[str, AgentBase] = {}
 
     # ------------------------------------------------------------------
@@ -66,13 +70,13 @@ class Orchestrator:
         """
         state = WorkflowState(task=task, focus_files=focus_files)
         history: list[dict] = []
-        planner = Planner()
+        planner = Planner(cfg=self.cfg)
 
         logger.info("Workflow started — task: %s", task)
         print("=" * 60)
         print("CODING AGENT — Starting workflow")
         print(f"Task: {task}")
-        print(f"Workspace: {config.WORKSPACE}")
+        print(f"Workspace: {self.cfg.workspace}")
         print("=" * 60)
 
         step_num = 0
@@ -126,7 +130,7 @@ class Orchestrator:
         """
         state = WorkflowState(task=task, focus_files=focus_files)
         history: list[dict] = []
-        planner = Planner()
+        planner = Planner(cfg=self.cfg)
 
         logger.info("Streaming workflow started — task: %s", task)
 

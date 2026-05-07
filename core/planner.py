@@ -10,10 +10,11 @@ The planner uses a hybrid approach:
 
 import json
 import re
+from config import Config, get_config
 from llm import call_llm
 from core.state import WorkflowState
 from core.logging_setup import get_logger
-import config
+from tools.patch import strip_markdown_fence
 
 logger = get_logger(__name__)
 
@@ -24,6 +25,9 @@ class Planner:
     Examines the current workflow state and execution history, then decides
     the single next step to execute. Falls back to rule-based defaults if
     the LLM response is unparseable.
+
+    Args:
+        cfg: Optional Config instance for dependency injection.
     """
 
     SYSTEM_PROMPT = """You are a workflow planner for an automated coding agent system.
@@ -63,6 +67,9 @@ IMPORTANT:
 Respond with exactly:
 {"step": "<step_name>", "reasoning": "<one sentence explaining why>"}"""
 
+    def __init__(self, cfg: Config = None):
+        self.cfg = cfg or get_config()
+
     def decide(self, state: WorkflowState, history: list[dict]) -> dict:
         """Decide the next workflow step.
 
@@ -81,7 +88,7 @@ Respond with exactly:
         summary = self._build_summary(state, history)
 
         try:
-            response = call_llm(summary, system=self.SYSTEM_PROMPT)
+            response = call_llm(summary, system=self.SYSTEM_PROMPT, cfg=self.cfg)
             decision = self._parse(response)
             if decision and self._is_valid_step(decision["step"]):
                 logger.debug("LLM planner chose: %s", decision["step"])
@@ -131,8 +138,8 @@ Respond with exactly:
         if last_lint == "failed":
             if last_step == "fix":
                 return {"step": "lint", "reasoning": "Fix applied, re-running lint to verify."}
-            if lint_fix_count < config.MAX_RETRIES:
-                return {"step": "fix", "reasoning": f"Lint failed (fix attempt {lint_fix_count + 1}/{config.MAX_RETRIES}).",
+            if lint_fix_count < self.cfg.max_retries:
+                return {"step": "fix", "reasoning": f"Lint failed (fix attempt {lint_fix_count + 1}/{self.cfg.max_retries}).",
                         "trigger": "lint"}
             # Max lint retries — move on
             if "test" not in completed:
@@ -147,8 +154,8 @@ Respond with exactly:
         if last_test == "failed":
             if last_step == "fix":
                 return {"step": "test", "reasoning": "Fix applied, re-running tests to verify."}
-            if test_fix_count < config.MAX_RETRIES:
-                return {"step": "fix", "reasoning": f"Tests failed (fix attempt {test_fix_count + 1}/{config.MAX_RETRIES}).",
+            if test_fix_count < self.cfg.max_retries:
+                return {"step": "fix", "reasoning": f"Tests failed (fix attempt {test_fix_count + 1}/{self.cfg.max_retries}).",
                         "trigger": "test"}
             # Max test retries — move on to review
 
@@ -193,7 +200,7 @@ Respond with exactly:
         if state.error:
             parts.append(f"\nCoder error: {state.error}")
 
-        parts.append(f"\nMax retries per check: {config.MAX_RETRIES}")
+        parts.append(f"\nMax retries per check: {self.cfg.max_retries}")
 
         parts.append("\nWhat is the NEXT step? Respond with JSON only.")
         return "\n".join(parts)
@@ -202,16 +209,7 @@ Respond with exactly:
     def _parse(response: str) -> dict | None:
         """Parse LLM response into a decision dict."""
         # Try to extract JSON from the response
-        text = response.strip()
-
-        # Remove markdown code fences if present
-        if text.startswith("```"):
-            lines = text.splitlines()
-            if lines[0].startswith("```"):
-                lines = lines[1:]
-            if lines and lines[-1].startswith("```"):
-                lines = lines[:-1]
-            text = "\n".join(lines).strip()
+        text = strip_markdown_fence(response, keepends=False)
 
         # Find JSON object
         match = re.search(r'\{[^{}]*"step"\s*:\s*"[^"]+"[^{}]*\}', text)

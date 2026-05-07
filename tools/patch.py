@@ -280,19 +280,34 @@ def _fuzzy_find(original: list[str], search: list[str]) -> tuple[int, int]:
 # Helpers
 # ---------------------------------------------------------------------------
 
-def _extract_diff(text: str) -> str:
-    """Extract unified diff from text that may contain markdown code blocks."""
+def strip_markdown_fence(text: str, keepends: bool = True) -> str:
+    """去除 markdown 代码块包裹，返回纯内容。
+
+    Args:
+        text: 可能被 ``` 包裹的文本。
+        keepends: True 时保留行尾换行符（用于 diff 解析），False 时去除。
+
+    Returns:
+        去除代码块标记后的纯文本。
+    """
     text = text.strip()
 
     if text.startswith("```"):
-        lines = text.splitlines(keepends=True)
+        lines = text.splitlines(keepends=keepends)
         content_lines = lines[1:]  # skip opening fence
-        if content_lines and content_lines[-1].strip() == "```":
+        if content_lines and content_lines[-1].strip().startswith("```"):
             content_lines = content_lines[:-1]
-        text = "".join(content_lines)
+        text = "".join(content_lines) if keepends else "\n".join(
+            l.rstrip("\n") for l in content_lines
+        )
 
     # Ensure diff ends with a newline (.strip() above may have removed it)
-    if text and not text.endswith("\n"):
+    if keepends and text and not text.endswith("\n"):
         text += "\n"
 
     return text
+
+
+def _extract_diff(text: str) -> str:
+    """从可能包含 markdown 代码块的文本中提取 unified diff（内部使用）。"""
+    return strip_markdown_fence(text, keepends=True)
