@@ -159,12 +159,16 @@ async def read_file(file_path: str):
 @app.get("/api/diff")
 async def get_diff():
     """Get the current git diff showing all uncommitted changes."""
+    # Windows 上 subprocess 默认使用 GBK 编码，git diff 输出可能包含非 GBK 字符导致
+    # UnicodeDecodeError。显式指定 UTF-8 编码避免 result.stdout 为 None。
     try:
         result = subprocess.run(
             ["git", "diff", "--no-color"],
             cwd=config.WORKSPACE,
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             timeout=10,
         )
     except Exception as e:

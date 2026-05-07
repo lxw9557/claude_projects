@@ -165,7 +165,7 @@ class Orchestrator:
             yield {"type": "step_error", "step": "workflow",
                    "error": f"Reached max steps ({self.MAX_STEPS})"}
 
-        yield {"type": "done", "state": state}
+        yield {"type": "done", "state": state.to_dict()}
 
     # ------------------------------------------------------------------
     # Step execution (CLI)
@@ -266,7 +266,8 @@ class Orchestrator:
             entry = self._do_review(state)
             if entry["result"] == "success":
                 yield {"type": "step_done", "step": "review",
-                       "review": state.review}
+                       "review": state.review,
+                       "state": state.to_dict()}
             else:
                 yield {"type": "step_error", "step": "review",
                        "error": entry.get("error", "Review failed")}

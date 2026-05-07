@@ -49,3 +49,19 @@ class WorkflowState:
 
     last_fix_patch: str = ""
     """Raw patch text from the most recent Fixer run."""
+
+    def to_dict(self) -> dict:
+        """将 WorkflowState 转为 JSON 可序列化的字典，供 SSE 事件传递。"""
+        return {
+            "task": self.task,
+            "focus_files": self.focus_files,
+            "modified_files": self.modified_files,
+            "patch": self.patch,
+            "test_results": self.test_results,
+            "lint_results": self.lint_results,
+            "review": self.review,
+            "error": self.error,
+            "fix_error": self.fix_error,
+            "fix_applied": self.fix_applied,
+            "last_fix_patch": self.last_fix_patch,
+        }

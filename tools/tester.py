@@ -24,6 +24,8 @@ def run_tests() -> dict:
         cwd=config.WORKSPACE,
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        errors="replace",
         timeout=120,
         env=_get_env(),
     )
@@ -47,6 +49,8 @@ def run_lint() -> dict:
         cwd=config.WORKSPACE,
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        errors="replace",
         timeout=60,
         env=_get_env(),
     )
