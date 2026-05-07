@@ -38,7 +38,13 @@ def apply_patch(patch_text: str) -> list[str]:
         is_new = change.get("is_new", False)
 
         if is_new:
-            results.append((path, change["new_lines"], True))
+            # Build new file content from hunk add lines
+            new_lines = []
+            for hunk in change["hunks"]:
+                for op, val in hunk["sequence"]:
+                    if op == "add":
+                        new_lines.append(val)
+            results.append((path, new_lines, True))
             continue
 
         if not os.path.exists(path):
@@ -81,7 +87,7 @@ def _parse_multi_file_diff(text: str) -> list[dict]:
     for line in lines:
         # File header: --- a/path or --- /dev/null
         if line.startswith("--- "):
-            if current and current.get("hunks"):
+            if current and (current.get("hunks") or current.get("_current_hunk_lines") is not None):
                 _finalize_hunk(current)
                 changes.append(current)
             current = {"path": None, "hunks": [], "is_new": False}
@@ -284,5 +290,9 @@ def _extract_diff(text: str) -> str:
         if content_lines and content_lines[-1].strip() == "```":
             content_lines = content_lines[:-1]
         text = "".join(content_lines)
+
+    # Ensure diff ends with a newline (.strip() above may have removed it)
+    if text and not text.endswith("\n"):
+        text += "\n"
 
     return text
